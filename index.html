@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<title>chess</title>
+	<script src="lib/easeljs.min.js"></script>
+	<script src="src/ChessController.js"></script>
+	<script src="src/BoardModel.js"></script>
+	<script src="src/PieceModel.js"></script>
+	<script src="src/MoveModel.js"></script>
+	<script src="src/SquareModel.js"></script>
+	<script src="src/NotationProcessor.js"></script>
+	<link href="styles.css" rel="stylesheet" type="text/css">
+
+<script>
+
+var canvas,
+stage,
+bg,
+bgOverlay, 
+flipped,
+playerColour,
+selectedPiece,
+boardSize,
+squareSize,
+mouseStartX,
+mouseStartY,
+piecesLoaded,
+notationProcessor,
+boardState;
+
+
+const PAWN = 0;
+const BISHOP = 1;
+const KNIGHT = 2;
+const ROOK = 3;
+const QUEEN = 4;
+const KING = 5;
+
+const WHITE = 0;
+const BLACK = 1;
+
+const CLICK_DISTANCE = 5;
+
+const BLACK_TINT = "rgba(0,0,0,0.2)";
+
+function init() {
+	canvas = document.getElementById("Canvas");
+	stage = new createjs.Stage(canvas);
+
+	bg = new createjs.Shape();
+	bgOverlay = new createjs.Shape();
+	stage.addChild(bg);
+	stage.addChild(bgOverlay);
+
+	boardState = new BoardModel();
+
+	playerColour = (Math.random() > 0.5)?WHITE:BLACK;
+	flipped = (playerColour==BLACK);
+
+	//create pieces
+	piecesLoaded = 0;
+
+	for (var i = 0; i < 8; i++)
+	{
+		createPiece(PAWN, WHITE, 1, i);
+		createPiece(PAWN, BLACK, 6, i);
+	}
+	createPiece(KING, WHITE, 0, 4);
+	createPiece(KING, BLACK, 7, 4);
+	createPiece(QUEEN, WHITE, 0, 3);
+	createPiece(QUEEN, BLACK, 7, 3);
+	createPiece(KNIGHT, WHITE, 0, 1);
+	createPiece(KNIGHT, WHITE, 0, 6);
+	createPiece(KNIGHT, BLACK, 7, 1);
+	createPiece(KNIGHT, BLACK, 7, 6);
+	createPiece(BISHOP, WHITE, 0, 2);
+	createPiece(BISHOP, WHITE, 0, 5);
+	createPiece(BISHOP, BLACK, 7, 2);
+	createPiece(BISHOP, BLACK, 7, 5);
+	createPiece(ROOK, WHITE, 0, 0);
+	createPiece(ROOK, WHITE, 0, 7);
+	createPiece(ROOK, BLACK, 7, 0);
+	createPiece(ROOK, BLACK, 7, 7);
+
+	stage.on("stagemousedown", mouseDown);
+	stage.on("stagemousemove", mouseMove);
+	stage.on("stagemouseup", mouseUp);
+
+	window.addEventListener("resize", redrawBoard);
+	redrawBoard();
+
+	evaluateBoard(boardState, playerColour);
+	nextTurn();
+}
+
+function getSquareFromCoords(x,y)
+{
+	var iX;
+	var iY;
+	if(flipped)
+	{
+		iX = Math.floor((boardSize-x)/squareSize);
+		iY = 7 - Math.floor((boardSize-y)/squareSize);
+	}
+	else
+	{
+		iX = Math.floor(x/squareSize);
+		iY = 7 - Math.floor(y/squareSize);
+	}
+
+	if(iX >= 0 && iX <= 7 && iY >= 0 && iY <= 7)
+	{
+		return {file:iX, rank:iY};
+	}
+	else
+		return undefined;
+}
+
+function mouseDown(event)
+{
+	mouseStartX = event.stageX
+	mouseStartY = event.stageY;
+}
+
+function getDistance(x1,y1,x2,y2)
+{
+	var a = x1 - x2;
+	var b = y1 - y2;
+	return Math.sqrt( a*a + b*b );
+}
+
+function finishTurn()
+{
+	drawMove();
+	evaluateBoard(boardState, playerColour);
+	switch(boardState.state)
+	{
+	case PLAY_ON:
+		nextTurn();
+		break;
+	case CHECKMATE:
+		setTimeout(function() { alert("CHECKMATE!"); }, 100);
+		break;
+	case STALEMATE:
+		setTimeout(function() { alert("STALEMATE!"); }, 100);
+		break;
+	}
+}
+
+function drawMove()
+{
+	if(boardState.lastMove.capturePiece != undefined)
+	{
+		stage.removeChild(boardState.lastMove.capturePiece.image);
+	}
+
+	placePieces();
+
+	stage.update();
+}
+
+function nextTurn()
+{
+	if(boardState.whosTurn == playerColour)
+	{
+		//player
+		selectedPiece = undefined;
+		drawOverlays();
+	}
+	else
+	{
+		//opponent move
+		setTimeout(function(){
+			var aiMove = getOpponentMove((playerColour==WHITE)?BLACK:WHITE, boardState);
+			if(aiMove == undefined) //out of book moves
+			{
+				alert("good");
+			}
+			else
+			{
+				makeMove(aiMove, boardState);
+				finishTurn();
+			}
+		}, 500);
+	}
+}
+
+function mouseUp(event)
+{
+	if (getDistance(mouseStartX, mouseStartY, event.stageX, event.stageY) < CLICK_DISTANCE)
+	{
+		//has clicked
+		if(boardState.whosTurn == playerColour)
+		{
+			var square = getSquareFromCoords(event.stageX, event.stageY);
+			if(square == undefined)
+			{
+				//clicked outside board
+				return;
+			}
+			else
+			{
+				if(selectedPiece == undefined)
+				{
+					//debug
+					var sq = boardState.getSquareAt(square.rank, square.file);
+					console.log("debug: " + sq);
+				}
+				else
+				{
+					for(var i = 0; i < selectedPiece.moves.length; i++)
+					{
+						var move = selectedPiece.moves[i];
+						if(move.isLegal && move.isBookMove && move.file == square.file && move.rank == square.rank)
+						{
+							selectedPiece = undefined;
+							drawOverlays();
+							makeMove(move, boardState);
+							finishTurn();
+							return;
+						}
+					}
+				}
+
+				var piece = boardState.getPieceAt(square.rank, square.file);
+				if(piece != undefined && piece.colour == boardState.whosTurn)
+				{
+					selectedPiece = piece;
+				}
+				else
+				{
+					selectedPiece = undefined;
+				}
+				drawOverlays();
+			}
+			
+		}
+	}
+}
+
+function mouseMove(event)
+{
+}
+
+function createPiece(pieceType, pieceColour, rank, file)
+{
+	var piece = new PieceModel(pieceType, pieceColour, rank, file);
+	boardState.addPiece(piece);
+	var image = new Image();
+	var src;
+	switch(pieceType)
+	{
+		case PAWN:
+			src = (pieceColour==WHITE)?"wp.png":"bp.png";
+			break
+		case KNIGHT:
+			src = (pieceColour==WHITE)?"wn.png":"bn.png";
+			break
+		case BISHOP:
+			src = (pieceColour==WHITE)?"wb.png":"bb.png";
+			break
+		case ROOK:
+			src = (pieceColour==WHITE)?"wr.png":"br.png";
+			break
+		case QUEEN:
+			src = (pieceColour==WHITE)?"wq.png":"bq.png";
+			break
+		case KING:
+			src = (pieceColour==WHITE)?"wk.png":"bk.png";
+			break
+	}
+	image.src = "img/" + src;
+    image.onload = handleImageLoad;
+    image.piece = piece;
+    return piece;
+}
+
+function handleImageLoad(event) 
+{
+    var image = event.target;
+    var bitmap = new createjs.Bitmap(image);
+    image.piece.image = bitmap;
+    stage.addChild(bitmap);
+    piecesLoaded++;
+    if(piecesLoaded == boardState.pieces.length)
+    {
+    	placePieces();
+    	stage.update();
+    }
+}
+
+function drawOverlays()
+{
+	bgOverlay.graphics.clear();
+	if (selectedPiece != undefined)
+	{
+		bgOverlay.graphics.beginFill("#F4F680")
+				.drawRect(fileToX(selectedPiece.file), rankToY(selectedPiece.rank), squareSize, squareSize)
+				.endFill();
+
+		for(var i = 0; i < selectedPiece.moves.length; i++)
+		{
+			var move = selectedPiece.moves[i];
+			if(move.isLegal)
+			{
+				if(move.capturePiece != undefined)
+				{
+					bgOverlay.graphics.setStrokeStyle(squareSize/14)
+					.beginStroke(BLACK_TINT)
+					.drawCircle(fileToX(move.file) + (0.5 * squareSize), rankToY(move.rank) + (0.5 * squareSize), squareSize/2.5)
+					.endStroke();
+				}
+				else
+				{
+					drawOverlayDotAt(move.file, move.rank);
+					/*if(move.moveType == CASTLE)
+					{
+						drawOverlayDotAt(move.castleRookX, move.y);
+					}*/
+				}
+			}
+		}
+	}
+	stage.update();
+}
+
+function drawOverlayDotAt(_file, _rank)
+{
+	bgOverlay.graphics.beginFill(BLACK_TINT)
+		.drawCircle(fileToX(_file) + (0.5 * squareSize), rankToY(_rank) + (0.5 * squareSize), squareSize/5)
+		.endFill();
+}
+
+function redrawBoard() 
+{
+	var w = window.innerWidth;
+	var h = window.innerHeight;
+
+	boardSize = Math.min(w,h);
+	squareSize = boardSize/8;
+	
+	canvas.width = boardSize;
+	canvas.height = boardSize;
+	
+	bg.graphics.clear();
+	for(var iX = 0; iX < 8; iX++)
+	{
+		for(var iY = 0; iY < 8; iY++)
+		{
+			var isBlack = !((iX%2==0&&iY%2==0) || (iX%2!=0&&iY%2!=0));
+			if(isBlack)
+			{
+				bg.graphics.beginFill("#779954")
+				.drawRect(iX*squareSize, iY*squareSize, squareSize, squareSize)
+				.endFill();
+			}
+		}
+	}
+
+	placePieces();
+	drawOverlays();
+
+	stage.update();
+}
+
+function placePieces()
+{
+	for (var i = 0; i < boardState.pieces.length; i++)
+	{
+		var piece = boardState.pieces[i];
+		if(!piece.captured && piece.image != undefined)
+		{
+			piece.image.scaleX = piece.image.scaleY = squareSize/150;
+			piece.image.x = fileToX(piece.file);
+			piece.image.y = rankToY(piece.rank);
+		}
+		
+	}
+}
+
+function fileToX(_file)
+{
+	if (flipped)
+	{
+		return boardSize - (_file+1) * squareSize;
+	}
+	else
+	{
+		return _file * squareSize;
+	}
+}
+
+function rankToY(_rank)
+{
+	if (flipped)
+	{
+		return _rank * squareSize;
+	}
+	else
+	{
+		return boardSize - (_rank+1) * squareSize;
+	}
+}
+
+</script>
+</head>
+
+<body onload="init();">
+
+<div>
+	<canvas id="Canvas" width="200" height="200",
+		style="background: #E9EDCC"></canvas>
+</div>
+
+</body>
+</html>
