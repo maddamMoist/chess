@@ -43,6 +43,7 @@ const BLACK = 1;
 const CLICK_DISTANCE = 5;
 
 const BLACK_TINT = "rgba(0,0,0,0.2)";
+const YELLOW_TINT = "rgba(244,246,128,0.7)";
 
 function init() {
 	canvas = document.getElementById("Canvas");
@@ -215,8 +216,8 @@ function mouseUp(event)
 						if(move.isLegal && move.isBookMove && move.file == square.file && move.rank == square.rank)
 						{
 							selectedPiece = undefined;
-							drawOverlays();
 							makeMove(move, boardState);
+							drawOverlays();
 							finishTurn();
 							return;
 						}
@@ -295,7 +296,7 @@ function drawOverlays()
 	bgOverlay.graphics.clear();
 	if (selectedPiece != undefined)
 	{
-		bgOverlay.graphics.beginFill("#F4F680")
+		bgOverlay.graphics.beginFill(YELLOW_TINT)
 				.drawRect(fileToX(selectedPiece.file), rankToY(selectedPiece.rank), squareSize, squareSize)
 				.endFill();
 
@@ -321,6 +322,14 @@ function drawOverlays()
 				}
 			}
 		}
+	}
+
+	if (boardState.lastMove!=undefined)
+	{
+		bgOverlay.graphics.beginFill(YELLOW_TINT)
+				.drawRect(fileToX(boardState.lastMove.piece.fromFile), rankToY(boardState.lastMove.piece.fromRank), squareSize, squareSize)
+				.drawRect(fileToX(boardState.lastMove.file), rankToY(boardState.lastMove.rank), squareSize, squareSize)
+				.endFill();
 	}
 	stage.update();
 }
